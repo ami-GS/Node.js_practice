@@ -1,45 +1,39 @@
 var http = require("http");
 var url = require("url");
-var net = require("net");
 var port = 8080;
 
+//cliReq : client request to proxy  #1
+//proReq : proxy request to server  #2
+//proRes : proxy response to client #4
+//svrRes : server response to proxy #3
+//cliReq -> proReq -> svrRes -> proRes
 
-function start() {
+http.createServer(function (cliReq, proRes) {
+	var reqUrl = url.parse(cliReq.url);
+	var body = "";
+	console.log(reqUrl.href);
 	
-	function onCliRequest(cliReq, cliRes) {
-		function onSvrResponse(svrRes){
-			cliRes.writeHead(svrRes.statusCode, svrRes.headers);
-			svrRes.pipe(cliRes);
-		};
-		
-		var req = url.parse(cliReq.url);
-		var options = {host: req.hostname, port: req.port || 80, path: req.path,
-					  method: cliReq.method, headers: cliReq.headers};
-		var svrReq = http.request(options, onSvrResponse);//like fetch
-		cliReq.pipe(svrReq);
-		svrReq.on("error", function onSvrReqErr(err) {
-			cliRes.writeHead(400, err.message, {"Content-Type": "text/html"});
-			cliRes.end("<h1>" + err.message + <br/> + cliReq.url + "</h1>");
-			printError(err, "svrReq", req.hostname + ":" + (req.port || 80));
-		});
-	};
-
-	var httpServer = http.createServer(onCliRequest).listen(port);
-
-	httpServer.on("clientError", function onCliErr(err, cliSoc) {
-		cliSoc.end();
-		printError(err, "cliErr", "");
-	});
-	
-	httpServer.on("connect", function onCliConnect(cliReq, cliSoc, cliHead) {
-		var req = url.parse("https://" + cliReq.url);
-		var svrSoc = net.connect(req.port || 443, req.hostname, 
-								 function onSvrConnect(svrRes, svrSoc2, svrHead) {
-			cliSoc.write("HTTP/1.0 200 Connection established\r\n\r\n");
-		});
+	cliReq.on("data", function(data) {
+		body += data; // #1
 	});
 
-	httpServer.on("close", function() {console.log("Sever closed")});
+	cliReq.on("end", function(){
+		var proReq = http.request({host: cliReq.headers.host,port: reqUrl.port || 80,
+								   path: reqUrl.path || "www.googole.com",
+								   method: cliReq.method,headers: cliReq.headers},
+		function(svrRes){
+			proRes.writeHead(svrRes.statusCode, svrRes.headers);
+			svrRes.on("data", function(chunk){
+				proRes.write(chunk); // #3 -> #4
+			});
+			svrRes.on("end", function() {
+				proRes.end();
+			});
+		});
 
-
-};
+		if (body.length > 0) {
+			proReq.write(body); // #2
+		}
+		proReq.end();
+	});
+}).listen(port);
